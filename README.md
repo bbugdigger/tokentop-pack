@@ -1,18 +1,16 @@
 # Agent Cost & Observability Pack
 
-A small portfolio of AI-agent harness extensions, demonstrating fluency with two production agent harnesses — **Claude Code** and **Pi / oh-my-pi** — by building the same observability primitive on both, and a single TUI viewer that consumes the unified output.
+A small toolkit for tracking what your AI coding agents are actually doing: how many tokens they consume, what they cost, which models you're spending the most on, and which tools each session leans on. Works with **Claude Code** and **Pi / oh-my-pi** today; designed so other harnesses can be added by writing a single producer.
 
-> The strongest signal a portfolio of this size can send is "I understand the abstraction across harnesses, not just one API."
-
-## Three artifacts
+Three pieces, one shared file:
 
 ```
-claude-code-hooks/token-ledger/   # Two Node hooks (Stop + PostToolUse) for Claude Code
-pi-extensions/token-ledger/        # One TS extension for Pi / oh-my-pi
-tokentop/                          # Live htop-style TUI viewer
+claude-code-hooks/token-ledger/   # Stop + PostToolUse hooks for Claude Code
+pi-extensions/token-ledger/        # Extension for Pi / oh-my-pi
+tokentop/                          # htop-style live TUI viewer
 ```
 
-The hooks/extension write to a shared JSONL ledger; tokentop tails it and aggregates. Adding a third harness later (Cursor, Copilot CLI, …) is one more producer — zero changes to the consumer.
+The hooks/extension write to `~/.agent-ledger/events.jsonl`; tokentop tails it and renders three live views (sessions / models / tools).
 
 ```
    ┌─────────────────────────┐         ┌──────────────────────┐
@@ -25,34 +23,68 @@ The hooks/extension write to a shared JSONL ledger; tokentop tails it and aggreg
                 ▼                                  ▼
                   ┌──────────────────────────────┐
                   │ ~/.agent-ledger/events.jsonl │
-                  │  (shared schema)             │
                   └──────────────┬───────────────┘
                                  │  fs.watchFile + tail
                                  ▼
                   ┌──────────────────────────────┐
                   │  tokentop                    │
-                  │  pure aggregator + TUI       │
+                  │  (live TUI)                  │
                   └──────────────────────────────┘
 ```
 
-## The cross-harness story (at a glance)
+## Quick start
 
-Same data flowing through two very different APIs. The contrast is the point:
+You don't need both producers installed. Try the consumer first against synthetic data:
 
-| Concern | Claude Code | Pi |
-|---|---|---|
-| Per-LLM token counts | Not in hook payload — must tail session transcript JSONL with a per-session byte cursor | Direct: `event.message.usage` on `message_end` |
-| Cost computation | Vendored `prices.json`, computed by the hook | Pi already computes `usage.cost.total` |
-| Tool duration | Not exposed cleanly — would need PreToolUse + PostToolUse pairing | Available on `tool_result` |
-| Process model | One hook subprocess per event | In-process subscriber |
-| Concurrency | File-append race-safe; per-session cursor file | None to manage |
-| LOC (incl. tests) | ~330 | ~150 |
+```bash
+TMP=/tmp/agent-ledger-demo.jsonl
+NOW=$(node -e "console.log(new Date().toISOString())")
+cat > $TMP <<EOF
+{"ts":"$NOW","event":"llm_call","harness":"claude-code","session":"smoke-A","model":"claude-opus-4-7","input_tokens":1842,"output_tokens":537,"cache_read_tokens":12044,"cache_creation_tokens":0,"cost_usd":0.0860}
+{"ts":"$NOW","event":"tool_call","harness":"claude-code","session":"smoke-A","tool":"Bash","ok":true,"bytes_out":1024,"duration_ms":312}
+{"ts":"$NOW","event":"llm_call","harness":"pi","session":"smoke-B","model":"claude-sonnet-4-6","input_tokens":2400,"output_tokens":100,"cache_read_tokens":0,"cache_creation_tokens":3000,"cost_usd":0.02}
+EOF
 
-Both write the same line into the same file. The viewer doesn't care which.
+cd tokentop
+npm start -- --ledger $TMP --no-ui   # one-shot summary
+npm start -- --ledger $TMP            # interactive TUI; q to quit
+```
+
+Then install the producer for whichever harness you use.
+
+## Install
+
+### Claude Code
+
+See [`claude-code-hooks/token-ledger/README.md`](claude-code-hooks/token-ledger/README.md). Short version: merge the snippet from `settings.json` into your `~/.claude/settings.json`, replacing the absolute paths with where you cloned this repo.
+
+### Pi / oh-my-pi
+
+See [`pi-extensions/token-ledger/README.md`](pi-extensions/token-ledger/README.md). Short version:
+
+- **pi-mono:** `cp -r pi-extensions/token-ledger ~/.pi/extensions/`
+- **oh-my-pi:** `cp -r pi-extensions/token-ledger ~/.omp/agent/extensions/` — install as an extension, **not** under `hooks/`. The `message_end` event we subscribe to is on the ExtensionAPI surface only; the legacy HookAPI doesn't expose it, so a hook-style install would silently drop all `llm_call` events.
+
+The same `index.ts` works on both pi-mono and oh-my-pi without any import changes — it uses local minimal type aliases instead of importing from the host package.
+
+The Pi extension also registers a `/tokentop` slash command:
+
+- `/tokentop` — opens the live tokentop TUI in a new terminal window (Windows only — POSIX falls back to printing the manual command)
+- `/tokentop status` — prints a one-line summary inline, e.g. `tokentop: $0.12 across 1 session(s), 2 turn(s), 1 tool call(s)`
+
+### tokentop
+
+```bash
+cd tokentop
+npm test
+npm start
+```
+
+Requires Node 22.6 or newer (uses `--experimental-strip-types` for native TypeScript). Zero runtime dependencies.
 
 ## Shared JSONL schema
 
-Path: `~/.agent-ledger/events.jsonl`. Append-only. One JSON object per line. Two event types.
+Path: `~/.agent-ledger/events.jsonl`. Append-only, one JSON object per line, two event types.
 
 ### `llm_call`
 ```json
@@ -85,79 +117,64 @@ Path: `~/.agent-ledger/events.jsonl`. Append-only. One JSON object per line. Two
 }
 ```
 
-Rules:
-- **Cost is computed at write time** by the producer. Old records keep their original cost (audit trail).
-- **No tool inputs/outputs** are logged — only metadata. Avoids leaking secrets, keeps file small.
-- **`cost_usd: null`** when the model is unknown to the producer's price table; consumer flags it in the footer.
-- **`harness`** is one of `"claude-code"`, `"pi"`, `"oh-my-pi"` — used by the consumer for display labels and source attribution.
-- **Optional `meta: object`** for harness-specific notes (e.g. `unknown_model: true`).
-- **ISO 8601 UTC timestamps** so cross-machine merges work.
+### Schema rules
 
-## Live demo
+- **Cost is computed at write time** by the producer. Old records keep their original cost (so historical totals don't shift if pricing changes).
+- **No tool inputs or outputs** are logged — only metadata (`tool`, `ok`, `bytes_out`, `duration_ms`). Keeps the file small and avoids leaking secrets that may appear in tool I/O.
+- **`cost_usd: null`** when the model is unknown to the producer's price table. The viewer surfaces these as a warning so they're not silently zero.
+- **`harness`** is one of `"claude-code"`, `"pi"`, `"oh-my-pi"`. The viewer uses it for display labels and source attribution.
+- **Optional `meta`** object for harness-specific notes (e.g. `unknown_model: true`, `apiErrorMessage: "..."`).
+- **ISO 8601 UTC timestamps** so files merged across machines stay sortable.
 
-End-to-end smoke (no Claude Code session needed):
+## How each producer works
 
-```bash
-TMP=/tmp/agent-ledger-demo.jsonl
-NOW=$(node -e "console.log(new Date().toISOString())")
-cat > $TMP <<EOF
-{"ts":"$NOW","event":"llm_call","harness":"claude-code","session":"smoke-A","model":"claude-opus-4-7","input_tokens":1842,"output_tokens":537,"cache_read_tokens":12044,"cache_creation_tokens":0,"cost_usd":0.0860}
-{"ts":"$NOW","event":"tool_call","harness":"claude-code","session":"smoke-A","tool":"Bash","ok":true,"bytes_out":1024,"duration_ms":312}
-{"ts":"$NOW","event":"llm_call","harness":"pi","session":"smoke-B","model":"claude-sonnet-4-6","input_tokens":2400,"output_tokens":100,"cache_read_tokens":0,"cache_creation_tokens":3000,"cost_usd":0.02}
-EOF
+The two producers solve the same problem differently because their host APIs expose different things:
 
-cd tokentop
-npm start -- --ledger $TMP --no-ui   # one-shot summary
-npm start -- --ledger $TMP            # interactive TUI; q to quit
-```
+| Concern | Claude Code | Pi |
+|---|---|---|
+| Per-LLM token counts | Not in hook payload — the hook tails the session transcript JSONL with a per-session byte cursor | Direct: `event.message.usage` on `message_end` |
+| Cost computation | Vendored `prices.json`, computed by the hook | Pi already provides `usage.cost.total` |
+| Tool duration | Not exposed cleanly without pairing PreToolUse + PostToolUse | Available on `tool_result` |
+| Process model | One hook subprocess per event | In-process subscriber |
+| Concurrency | File-append race-safe; per-session cursor file | None to manage |
 
-## Real install
+Both write the same line into the same file; the viewer doesn't care which produced it.
 
-1. **Tokentop** (Node 22.6+, zero runtime deps):
-   ```bash
-   cd tokentop && npm test && npm start
-   ```
+## Adding a new harness
 
-2. **Claude Code hooks** — see [`claude-code-hooks/token-ledger/README.md`](claude-code-hooks/token-ledger/README.md).
-   Tl;dr: merge `settings.json` into `~/.claude/settings.json`, replace the absolute paths.
+1. Write a producer that subscribes to the harness's "LLM call finished" and "tool call finished" hooks.
+2. Map the harness's field names to the schema above.
+3. Compute `cost_usd` from your own price table, or set it to `null` if pricing isn't known.
+4. Append one JSON line per event to `~/.agent-ledger/events.jsonl`.
 
-3. **Pi extension** — see [`pi-extensions/token-ledger/README.md`](pi-extensions/token-ledger/README.md).
-   - pi-mono: `cp -r pi-extensions/token-ledger ~/.pi/extensions/`
-   - oh-my-pi: `cp -r pi-extensions/token-ledger ~/.omp/agent/extensions/` (note: **extensions**, not `hooks/` — `message_end` is extension-only on oh-my-pi).
-   - Same file works on both: `index.ts` uses local minimal types, no import path swap.
-
-After all three are in place: open three terminals — one for Claude Code, one for Pi, one for `tokentop`. Watch sessions appear and tokens climb in real time.
+The viewer needs no changes — add an entry for your `harness` value to its display-label map if you want a friendlier name in the table.
 
 ## Tests
 
-86 tests across the three components, all green.
-
 ```bash
 ( cd claude-code-hooks/token-ledger && npm test )   # 28 tests
-( cd pi-extensions/token-ledger     && npm test )   # 9 tests
+( cd pi-extensions/token-ledger     && npm test )   # 13 tests
 ( cd tokentop                        && npm test )   # 49 tests
 ```
 
-The Claude Code suite includes 7 integration tests that spawn the actual hook scripts as subprocesses with sample transcript fixtures and assert ledger output. The Pi extension is tested with a mock `ExtensionAPI` (no Pi/Bun required at test time). The aggregator is tested as a pure function over event arrays — no mocks, no fake clocks.
+Highlights:
 
-## Engineering choices worth flagging
+- The Claude Code suite includes integration tests that spawn the actual hook scripts as subprocesses with sample transcript fixtures and assert the resulting ledger output.
+- The Pi extension is covered by mock-API tests — no Pi or Bun runtime required to run them.
+- The aggregator is tested as a pure function over event arrays: no mocks, no fake clocks, no filesystem.
 
-- **Zero runtime dependencies** for tokentop. Raw ANSI for the TUI; built-in `node:test` + `node:assert`. Total external deps for the whole repo: zero. Reviewers can audit it in one sitting.
-- **Pure-function aggregator.** All state changes go through `ingest(event)`; everything else is `snapshot(now_ms)`. Testable without timers or filesystem.
-- **Hard separation of I/O from logic.** `ledger.ts` knows about file watching but not aggregation. `aggregator.ts` knows about events but not files. `views.ts` knows about layout but not events. `ui.ts` knows about terminals.
-- **Honest about the harness contrast.** The Claude Code hook is bigger and uglier on purpose — it works around a real limitation in CC's hook API. The Pi extension is small because Pi's API is better. Both ship.
+## Limitations / not supported
 
-## What's not here (deliberately)
-
-- **Auto-updating prices.** `prices.json` is a frozen snapshot per the README in `claude-code-hooks/token-ledger/`. Documented; don't pretend otherwise.
-- **Tool inputs/outputs in the ledger.** Privacy + size + scope.
-- **Web dashboard.** The TUI is the point.
-- **Cursor / Copilot CLI / Aider producers.** The architecture supports them; building them is a follow-up.
+- **Auto-updating prices.** `prices.json` (Claude Code side) is a frozen snapshot. Pi/oh-my-pi computes cost itself, so its events are unaffected.
+- **Tool inputs and outputs are not stored.** This is by design — the ledger is for cost/usage, not audit replay.
+- **No web UI.** The TUI is the only viewer.
+- **Producers shipped:** Claude Code, Pi, oh-my-pi. Cursor / Copilot CLI / Aider / others would need their own producer (small — see "Adding a new harness" above).
+- **Window-spawning of `/tokentop` is Windows-only** in the current Pi extension. POSIX shells get a fallback message with the manual command.
 
 ## File map
 
 ```
-README.md                                  # this file
+README.md
 claude-code-hooks/
   token-ledger/
     log-tool.js, log-llm.js, transcript.js, cost.js, ledger.js
@@ -170,5 +187,6 @@ pi-extensions/
 tokentop/
   src/{main,ui,views,ledger,aggregator,format,ansi,types}.ts
   test/{format,aggregator,ledger,views}.test.ts
-  package.json, README.md
+  scripts/demo-feeder.mjs
+  demo.tape, package.json, README.md
 ```

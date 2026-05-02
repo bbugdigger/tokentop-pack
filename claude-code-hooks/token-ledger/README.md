@@ -5,9 +5,9 @@ Two hooks for [Claude Code](https://claude.com/claude-code) that emit LLM and to
 - **`log-tool.js`** (`PostToolUse`) — emits one `tool_call` event per tool invocation.
 - **`log-llm.js`** (`Stop`) — tails the session transcript and emits one `llm_call` event per assistant turn (with token counts and computed cost).
 
-## Why this is non-trivial
+## How it works
 
-Claude Code's hook payloads do **not** include per-LLM token counts. Token usage lives in the session transcript JSONL at `~/.claude/projects/<project>/<session-id>.jsonl`, in `entry.message.usage` on each `"type":"assistant"` line.
+Claude Code's hook payloads do **not** include per-LLM token counts. Token usage lives in the session transcript JSONL at `~/.claude/projects/<project>/<session-id>.jsonl`, in `entry.message.usage` on each `"type":"assistant"` line. The `Stop` hook reads from there.
 
 So `log-llm.js`:
 1. On every `Stop` event, opens the transcript at the session's stored byte cursor.

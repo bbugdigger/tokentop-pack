@@ -2,11 +2,9 @@
 
 A single-file TypeScript extension that subscribes to Pi's lifecycle events and emits LLM and tool call events to the same `~/.agent-ledger/events.jsonl` consumed by [tokentop](../../tokentop/) and produced by the [Claude Code hooks](../../claude-code-hooks/token-ledger/).
 
-## Why this is small
+## How it works
 
-Pi already computes per-call cost into `m.usage.cost.total` (see `pi-mono/packages/ai/src/types.ts` `Usage` interface). The extension just maps Pi's normalized field names to the ledger schema and writes one line per event. No `prices.json`, no transcript tailing, no cursors.
-
-This is the cross-harness story: Claude Code **needed** a transcript-tailing workaround because hook payloads don't carry usage; Pi exposes everything in the event stream and we get a ~50-LOC extension. Same ledger comes out the other end.
+Pi already computes per-call cost into `m.usage.cost.total` (see `pi-mono/packages/ai/src/types.ts` `Usage` interface). The extension just maps Pi's normalized field names to the ledger schema and writes one line per event — no `prices.json`, no transcript tailing, no cursors.
 
 ## Events used
 
@@ -100,12 +98,23 @@ identical between pi-mono and oh-my-pi.
 npm test
 ```
 
-9 tests covering: handler registration, assistant-message detection, user-message ignore, missing-cost null fallback, tool result success/error, undefined session-file fallback, event ordering. The tests mock `ExtensionAPI` so they run without Pi or Bun installed — only Node 22.6+.
+13 tests covering: handler registration, assistant-message detection, user-message ignore, missing-cost null fallback, tool result success/error, undefined session-file fallback, event ordering, `/tokentop` slash command registration, `/tokentop status` summary, and POSIX fallback for the window-spawn. The tests mock `ExtensionAPI` so they run without Pi or Bun installed — only Node 22.6+.
+
+## /tokentop slash command
+
+The extension also registers a slash command in Pi/oh-my-pi:
+
+| Command | Effect |
+|---|---|
+| `/tokentop` | Opens the live tokentop TUI in a new terminal window (Windows; spawns `cmd /k node ...`). On POSIX, prints the manual command instead. |
+| `/tokentop status` | Prints a one-line summary inline via `ctx.ui.notify` — total cost, session count, turn count, tool-call count. |
+
+Set `TOKENTOP_DIR` to override the default tokentop install path (defaults to `C:\TheFactory\AgentHarness\tokentop`).
 
 ## File layout
 
 ```
-index.ts             # The extension (~70 LOC)
+index.ts             # The extension (~230 LOC: events + /tokentop command)
 package.json
 README.md
 test/
