@@ -1,0 +1,34 @@
+# Upstream projects this repo builds extensions FOR — not ours to ship.
+pi-mono/
+oh-my-pi/
+
+# Claude Code workspace state (machine-local permissions, not part of deliverable).
+.claude/
+
+# Node
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.npm/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Logs and runtime data
+*.log
+.agent-ledger/
+events.jsonl
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Demo artifacts (regenerable; don't bloat repo with binaries)
+tokentop/demo.gif
+tokentop/demo.mp4
+*.swp
+*.swo

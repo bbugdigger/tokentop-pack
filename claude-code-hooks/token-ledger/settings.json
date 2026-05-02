@@ -1,0 +1,20 @@
+{
+  "_comment": "Snippet to merge into ~/.claude/settings.json. Replace the absolute paths with where you cloned this repo.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          { "type": "command", "command": "node /ABSOLUTE/PATH/TO/claude-code-hooks/token-ledger/log-tool.js" }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node /ABSOLUTE/PATH/TO/claude-code-hooks/token-ledger/log-llm.js" }
+        ]
+      }
+    ]
+  }
+}

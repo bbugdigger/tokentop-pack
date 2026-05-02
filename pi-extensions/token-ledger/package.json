@@ -1,0 +1,14 @@
+{
+  "name": "token-ledger-pi",
+  "version": "0.1.0",
+  "description": "Pi/oh-my-pi extension that emits LLM and tool call events to ~/.agent-ledger/events.jsonl (consumed by tokentop)",
+  "type": "module",
+  "main": "index.ts",
+  "private": true,
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "engines": {
+    "node": ">=22.6.0"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "token-ledger-claude-code",
+  "version": "0.1.0",
+  "description": "Claude Code hooks that emit LLM and tool call events to ~/.agent-ledger/events.jsonl",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

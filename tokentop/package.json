@@ -1,0 +1,15 @@
+{
+  "name": "tokentop",
+  "version": "0.1.0",
+  "description": "htop-style live viewer for AI agent token spend across Claude Code and Pi/oh-my-pi",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node --experimental-strip-types src/main.ts",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "license": "MIT"
+}
